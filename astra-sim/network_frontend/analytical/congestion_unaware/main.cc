@@ -346,15 +346,14 @@ int main(int argc, char* argv[]) {
                 ? std::strtoll(new_filename.c_str() + 5, nullptr, 10)
                 : 0;
             if (deadline < 0) {
-              // "pass -1": the frontend is opting this NPU out of
-              // suppression, because whether it answers again on the *next*
-              // tick is itself part of the model. That is true for DP-group
-              // instances: an idle member emits a dummy batch so the round's
-              // ALLTOALL still syncs, so how often it is polled decides how
-              // many dummy waves exist. Suppressing there moved moe_dp_pp by
-              // -4.0% (578 batches -> 572). Poll-rate should not be a
-              // modelling input, but fixing that is a scheduler change, not
-              // this one.
+              // "pass -1": the frontend changed scheduler state while
+              // answering "pass" -- it joined a DP barrier round, or handed a
+              // batch claim back. Such a pass is not idempotent, so treat it
+              // exactly like a workload assignment: stay askable, and re-open
+              // every other NPU as well. Without the bump the barrier stalls
+              // until the backstop fires, which perturbed the dummy-wave
+              // count (moe_dp_pp 578 batches -> 572, -4.0%).
+              ++state_gen;
               pass_gen[npu_id] = -1;
             } else {
               pass_gen[npu_id] = state_gen;
@@ -426,15 +425,14 @@ int main(int argc, char* argv[]) {
                 ? std::strtoll(new_filename.c_str() + 5, nullptr, 10)
                 : 0;
             if (deadline < 0) {
-              // "pass -1": the frontend is opting this NPU out of
-              // suppression, because whether it answers again on the *next*
-              // tick is itself part of the model. That is true for DP-group
-              // instances: an idle member emits a dummy batch so the round's
-              // ALLTOALL still syncs, so how often it is polled decides how
-              // many dummy waves exist. Suppressing there moved moe_dp_pp by
-              // -4.0% (578 batches -> 572). Poll-rate should not be a
-              // modelling input, but fixing that is a scheduler change, not
-              // this one.
+              // "pass -1": the frontend changed scheduler state while
+              // answering "pass" -- it joined a DP barrier round, or handed a
+              // batch claim back. Such a pass is not idempotent, so treat it
+              // exactly like a workload assignment: stay askable, and re-open
+              // every other NPU as well. Without the bump the barrier stalls
+              // until the backstop fires, which perturbed the dummy-wave
+              // count (moe_dp_pp 578 batches -> 572, -4.0%).
+              ++state_gen;
               pass_gen[npu_id] = -1;
             } else {
               pass_gen[npu_id] = state_gen;
