@@ -12,6 +12,7 @@ LICENSE file in the root directory of this source tree.
 #include <memory_backend/analytical/AnalyticalMemory.hh>
 #include <json/json.hpp>
 #include <unistd.h>
+#include <cstdlib>
 #include <iostream>
 
 using namespace AstraSim;
@@ -216,6 +217,24 @@ int main(int argc, char* argv[]) {
     //     event_queue->proceed();
     // }
 
+    // Per-tick polling trace, off by default. The two "Checking ..." lines
+    // below fired on every event-queue tick for every NPU, whether or not
+    // that NPU had anything to report, and the Python frontend must read
+    // every one of them back over the pipe before it can see the "Waiting"
+    // it is actually blocked on. On a 10-request run at 8 NPUs they were
+    // 2,397,257 of the 3,072,837 lines it read (78%); on an MoE DP+EP run,
+    // 12,734,237 of 12,788,005 (99.6%), because the volume scales with
+    // event-queue ticks rather than with handshakes. Set
+    // ASTRA_SIM_TRACE_POLLING=1 to bring them back when debugging a hang --
+    // they show which NPU is being polled, which is what you want then.
+    //
+    // "Checking Non-Exited Systems ..." further down is *protocol*, not
+    // debug: Controller.read_wait terminates its read loop on that exact
+    // string. Likewise "All Request Has Been Exited" / "ERROR: Some
+    // Requests Remain" for Controller.check_end. Leave all three alone.
+    static const bool trace_polling =
+        (std::getenv("ASTRA_SIM_TRACE_POLLING") != nullptr);
+
     bool exit = false;
     while (!exit) {
       if(!event_queue->finished()){
@@ -227,7 +246,9 @@ int main(int argc, char* argv[]) {
 
       for (std::size_t idx = 0; idx < end_npu_ids.size(); ++idx) {
         int npu_id = end_npu_ids[idx];
-        cout << "Checking End NPU " << npu_id << " ..." << endl;
+        if (trace_polling) {
+          cout << "Checking End NPU " << npu_id << " ..." << endl;
+        }
         // Only proceed if the workload has finished its iteration
         if (!systems[npu_id]->workload->is_sleep && systems[npu_id]->workload->is_finished) {
           systems[npu_id]->workload->report();
@@ -264,7 +285,10 @@ int main(int argc, char* argv[]) {
       for (std::size_t idx = 0; idx < start_npu_ids.size(); ++idx) {
         int npu_id = start_npu_ids[idx];
         // Only proceed if the workload has finished its iteration
-        cout << "Checking Managed Systems for Controller NPU " << npu_id << " ..." << endl;
+        if (trace_polling) {
+          cout << "Checking Managed Systems for Controller NPU "
+               << npu_id << " ..." << endl;
+        }
         if (!systems[npu_id]->workload->is_sleep && systems[npu_id]->workload->is_finished) {
           systems[npu_id]->workload->report();
           AstraSim::LoggerFactory::get_logger("workload")->info("Waiting");
