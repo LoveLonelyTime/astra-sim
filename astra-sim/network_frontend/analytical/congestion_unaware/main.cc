@@ -348,13 +348,21 @@ int main(int argc, char* argv[]) {
             if (deadline < 0) {
               // "pass -1": the frontend changed scheduler state while
               // answering "pass" -- it joined a DP barrier round, or handed a
-              // batch claim back. Such a pass is not idempotent, so treat it
-              // exactly like a workload assignment: stay askable, and re-open
-              // every other NPU as well. Without the bump the barrier stalls
-              // until the backstop fires, which perturbed the dummy-wave
-              // count (moe_dp_pp 578 batches -> 572, -4.0%).
+              // batch claim back. Such a pass is not idempotent, so re-open
+              // every *other* NPU, exactly as a workload assignment does.
+              // Without the bump the barrier stalls until the backstop fires,
+              // which perturbed the dummy-wave count (moe_dp_pp 578 batches
+              // -> 572, -4.0%).
+              //
+              // This NPU is suppressed at the *new* generation, not left
+              // askable. Its own answer cannot change until somebody else
+              // moves -- it is waiting on the rest of the round -- so leaving
+              // it open just re-asked it every tick until the round closed.
+              // That was 4.8 handshakes per DP wave against the 3 this
+              // barrier needs (join, peer closes the round, pick up).
               ++state_gen;
-              pass_gen[npu_id] = -1;
+              pass_gen[npu_id] = state_gen;
+              pass_deadline[npu_id] = 0;
             } else {
               pass_gen[npu_id] = state_gen;
               pass_deadline[npu_id] = deadline;
@@ -427,13 +435,21 @@ int main(int argc, char* argv[]) {
             if (deadline < 0) {
               // "pass -1": the frontend changed scheduler state while
               // answering "pass" -- it joined a DP barrier round, or handed a
-              // batch claim back. Such a pass is not idempotent, so treat it
-              // exactly like a workload assignment: stay askable, and re-open
-              // every other NPU as well. Without the bump the barrier stalls
-              // until the backstop fires, which perturbed the dummy-wave
-              // count (moe_dp_pp 578 batches -> 572, -4.0%).
+              // batch claim back. Such a pass is not idempotent, so re-open
+              // every *other* NPU, exactly as a workload assignment does.
+              // Without the bump the barrier stalls until the backstop fires,
+              // which perturbed the dummy-wave count (moe_dp_pp 578 batches
+              // -> 572, -4.0%).
+              //
+              // This NPU is suppressed at the *new* generation, not left
+              // askable. Its own answer cannot change until somebody else
+              // moves -- it is waiting on the rest of the round -- so leaving
+              // it open just re-asked it every tick until the round closed.
+              // That was 4.8 handshakes per DP wave against the 3 this
+              // barrier needs (join, peer closes the round, pick up).
               ++state_gen;
-              pass_gen[npu_id] = -1;
+              pass_gen[npu_id] = state_gen;
+              pass_deadline[npu_id] = 0;
             } else {
               pass_gen[npu_id] = state_gen;
               pass_deadline[npu_id] = deadline;
