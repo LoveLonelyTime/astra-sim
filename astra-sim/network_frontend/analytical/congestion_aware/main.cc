@@ -220,23 +220,19 @@ int main(int argc, char* argv[]) {
     //     event_queue->proceed();
     // }
 
-    // Per-tick polling trace, off by default. The two "Checking ..." lines
-    // below fired on every event-queue tick for every NPU, whether or not
-    // that NPU had anything to report, and the Python frontend must read
-    // every one of them back over the pipe before it can see the "Waiting"
-    // it is actually blocked on. On a 10-request run at 8 NPUs they were
-    // 2,397,257 of the 3,072,837 lines it read (78%); on an MoE DP+EP run,
-    // 12,734,237 of 12,788,005 (99.6%), because the volume scales with
-    // event-queue ticks rather than with handshakes. Set
-    // ASTRA_SIM_TRACE_POLLING=1 to bring them back when debugging a hang --
-    // they show which NPU is being polled, which is what you want then.
+    // There is deliberately no per-tick "Checking NPU ..." trace here. It
+    // used to print once per NPU per event-queue tick regardless of whether
+    // that NPU had anything to report, and the frontend has to read every
+    // such line off the pipe before it reaches the "Waiting" it is blocked
+    // on: 2,397,257 of 3,072,837 lines on a 10-request 8-NPU run (78%), and
+    // 12,734,237 of 12,788,005 on an MoE DP+EP run (99.6%), because the
+    // volume follows event-queue ticks rather than handshakes. `git log` has
+    // it if a hang ever needs it back.
     //
     // "Checking Non-Exited Systems ..." further down is *protocol*, not
     // debug: Controller.read_wait terminates its read loop on that exact
     // string. Likewise "All Request Has Been Exited" / "ERROR: Some
     // Requests Remain" for Controller.check_end. Leave all three alone.
-    static const bool trace_polling =
-        (std::getenv("ASTRA_SIM_TRACE_POLLING") != nullptr);
 
     // ---- Idle-NPU re-ask suppression ------------------------------------
     // A finished NPU that answered "pass" will answer "pass" again until
@@ -278,15 +274,7 @@ int main(int argc, char* argv[]) {
     long long state_gen = 0;
     long long unasked_rounds = 0;
 
-    // Escape hatch: ASTRA_SIM_NO_IDLE_SUPPRESSION=1 restores the old
-    // ask-every-NPU-every-tick behaviour, for bisecting a result that moved.
-    static const bool no_suppression =
-        (std::getenv("ASTRA_SIM_NO_IDLE_SUPPRESSION") != nullptr);
-
     auto askable = [&](int npu_id) {
-      if (no_suppression) {
-        return true;
-      }
       if (pass_gen[npu_id] < 0) {
         return true;
       }
@@ -319,9 +307,6 @@ int main(int argc, char* argv[]) {
       
       for (std::size_t idx = 0; idx < end_npu_ids.size(); ++idx) {
         int npu_id = end_npu_ids[idx];
-        if (trace_polling) {
-          cout << "Checking End NPU " << npu_id << " ..." << endl;
-        }
         // Only proceed if the workload has finished its iteration
         if (!systems[npu_id]->workload->is_sleep &&
             systems[npu_id]->workload->is_finished && askable(npu_id)) {
@@ -406,10 +391,6 @@ int main(int argc, char* argv[]) {
       for (std::size_t idx = 0; idx < start_npu_ids.size(); ++idx) {
         int npu_id = start_npu_ids[idx];
         // Only proceed if the workload has finished its iteration
-        if (trace_polling) {
-          cout << "Checking Managed Systems for Controller NPU "
-               << npu_id << " ..." << endl;
-        }
         if (!systems[npu_id]->workload->is_sleep &&
             systems[npu_id]->workload->is_finished && askable(npu_id)) {
           asked_any = true;
