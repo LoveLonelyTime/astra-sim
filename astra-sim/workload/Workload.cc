@@ -6,6 +6,7 @@ LICENSE file in the root directory of this source tree.
 #include "astra-sim/workload/Workload.hh"
 
 #include "astra-sim/common/Logging.hh"
+#include "astra-sim/common/ChromeTracer.hh"
 #include "astra-sim/system/IntData.hh"
 #include "astra-sim/system/MemEventHandlerData.hh"
 #include "astra-sim/system/RecvPacketEventHandlerData.hh"
@@ -175,6 +176,7 @@ void Workload::issue(shared_ptr<Chakra::ETFeederNode> node) {
 void Workload::issue_replay(shared_ptr<Chakra::ETFeederNode> node) {
     WorkloadLayerHandlerData* wlhd = new WorkloadLayerHandlerData;
     wlhd->node_id = node->id();
+    wlhd->tracer_event = ChromeTracer::GetInstance().Begin(node->name(), node->is_cpu_op() ? CHROME_TRACER_CAT_CPU_OP : CHROME_TRACER_CAT_GPU_OP, Sys::boostedTick(), 0, sys->id);
     uint64_t runtime = 1ul;
     if (node->runtime() != 0ul) {
         // chakra runtimes are in microseconds and we should convert it into
@@ -432,7 +434,9 @@ void Workload::call(EventType event, CallData* data) {
             WorkloadLayerHandlerData* wlhd = (WorkloadLayerHandlerData*)data;
             shared_ptr<Chakra::ETFeederNode> node =
                 et_feeder->lookupNode(wlhd->node_id);
-
+            if (wlhd->tracer_event != nullptr) {
+                ChromeTracer::GetInstance().End(std::move(wlhd->tracer_event), Sys::boostedTick());
+            }
             if (sys->trace_enabled) {
                 LoggerFactory::get_logger("workload")
                     ->debug("callback,sys->id={}, tick={}, node->id={}, "

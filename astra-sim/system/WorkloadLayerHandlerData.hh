@@ -8,6 +8,7 @@ LICENSE file in the root directory of this source tree.
 
 #include "astra-sim/common/AstraNetworkAPI.hh"
 #include "astra-sim/system/BasicEventHandlerData.hh"
+#include "astra-sim/common/ChromeTracer.hh"
 
 namespace AstraSim {
 
@@ -22,6 +23,7 @@ class WorkloadLayerHandlerData : public BasicEventHandlerData, public MetaData {
     bool pim_enabled;
     uint32_t pim_channel_id;
     uint64_t pim_runtime;
+    std::unique_ptr<ChromeTracer::TraceEvent> tracer_event;
     WorkloadLayerHandlerData();
 };
 

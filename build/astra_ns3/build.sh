@@ -24,6 +24,12 @@ function compile {
     ./ns3 build AstraSimNetwork -j 12
     cd "${SCRIPT_DIR:?}"
 }
+function compile_debug {
+    cd "${NS3_DIR}"
+    ./ns3 configure --enable-mpi --build-profile debug
+    ./ns3 build AstraSimNetwork -j 12
+    cd "${SCRIPT_DIR:?}"
+}
 function run {
     cd "${NS3_DIR}/build/scratch"
     ./ns3.42-AstraSimNetwork-default \
@@ -79,6 +85,9 @@ case "$1" in
 -c|--compile|"")
     setup
     compile;;
+--compile-debug)
+    setup
+    compile_debug;;
 -r|--run)
     # setup
     # compile

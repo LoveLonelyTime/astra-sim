@@ -1,4 +1,5 @@
 #include "astra-sim/common/AstraNetworkAPI.hh"
+#include "astra-sim/common/ChromeTracer.hh"
 #include "astra-sim/system/Sys.hh"
 #include "extern/memory_backend/analytical/AnalyticalMemory.hh"
 #include <json/json.hpp>
@@ -97,7 +98,6 @@ class NS3BackendCompletionTracker {
             }
             Simulator::Stop();
             Simulator::Destroy();
-            exit(0);
         }
 
     private:
@@ -417,11 +417,14 @@ int main(int argc, char* argv[]) {
                 }
                 else{ // add new worklaod
                     // cout << "Adding " << new_filename << endl;
-                    systems[i]->workload->addWorkload(new_filename);
+                    systems[i]->workload->add_workload(new_filename, {});
                 }
             }
         }
     }
     completion_tracker->check_all_ranks_finished();
+
+    ChromeTracer::GetInstance().Dump("log/log_trace.json");
+    AstraSim::LoggerFactory::get_logger("workload")->info("ChromeTracer dumped to log/log_trace.json");
     return 0;
 }
