@@ -4,6 +4,7 @@
 #include "extern/memory_backend/analytical/AnalyticalMemory.hh"
 #include <json/json.hpp>
 
+#include <zmq.hpp>
 #include "entry.h"
 #include "ns3/applications-module.h"
 #include "ns3/core-module.h"
@@ -235,6 +236,9 @@ string memory_configuration;
 string comm_group_configuration = "empty";
 string logical_topology_configuration;
 string logging_configuration = "empty";
+string zmq_addr;
+std::vector<uint32_t> start_npu_ids;
+std::vector<uint32_t> end_npu_ids;
 int num_queues_per_dim = 1;
 double comm_scale = 1;
 double injection_scale = 1;
@@ -242,7 +246,7 @@ bool rendezvous_protocol = false;
 auto logical_dims = vector<int>();
 int num_npus = 1;
 auto queues_per_dim = vector<int>();
-static constexpr uint64_t idle_ticks = 100;
+static constexpr uint64_t idle_ticks = 100000000;
 
 // TODO: Migrate to yaml
 void read_logical_topo_config(string network_configuration,
@@ -275,8 +279,31 @@ void read_logical_topo_config(string network_configuration,
     queues_per_dim = vector<int>(logical_dims.size(), num_queues_per_dim);
 }
 
+void parse_vec(const string& str, vector<uint32_t>& vec) {
+    std::stringstream ss(str);
+    std::string token;
+    
+    while (std::getline(ss, token, ',')) {
+        if (!token.empty()) {
+            vec.push_back(static_cast<uint32_t>(std::stoul(token)));
+        }
+    }
+}
+
+void parse_cmd(const std::string& str, vector<std::string>& comp) {
+    std::stringstream ss(str);
+    std::string token;
+    
+    while (ss >> token) {
+        comp.push_back(token);
+    }
+}
+
 // Read command line arguments.
 void parse_args(int argc, char* argv[]) {
+    std::string start_npu_ids_str;
+    std::string end_npu_ids_str;
+
     CommandLine cmd;
     cmd.AddValue("workload-configuration", "Workload configuration file.",
                  workload_configuration);
@@ -296,6 +323,12 @@ void parse_args(int argc, char* argv[]) {
                  "Logging configuration file", 
                  logging_configuration);
 
+    cmd.AddValue("zmq-addr", "Address of ZMQ",
+                 zmq_addr);
+    cmd.AddValue("start-npu-ids", "IDs of start npu of instances.",
+                 start_npu_ids_str);
+    cmd.AddValue("end-npu-ids", "IDs of end npu of instances.",
+                 end_npu_ids_str);
     cmd.AddValue("num-queues-per-dim", "Number of queues per each dimension",
                  num_queues_per_dim);
     cmd.AddValue("comm-scale", "Communication scale", comm_scale);
@@ -304,22 +337,36 @@ void parse_args(int argc, char* argv[]) {
                  rendezvous_protocol);
 
     cmd.Parse(argc, argv);
+
+    parse_vec(start_npu_ids_str, start_npu_ids);
+    parse_vec(end_npu_ids_str, end_npu_ids);
+}
+
+void report_to_zmq(zmq::socket_t& socket, AstraSim::Sys* sys) {
+    Tick curr_tick = Sys::boostedTick();
+
+    std::stringstream ss;
+    ss << "Waiting" << " " << sys->id << " " << sys->workload->iteration << " " << curr_tick << " " << (curr_tick - sys->workload->hw_resource->tics_gpu_ops);
+
+    socket.send(zmq::buffer(ss.str()), zmq::send_flags::none);
 }
 
 int main(int argc, char* argv[]) {
     LogComponentEnable("OnOffApplication", LOG_LEVEL_INFO);
     LogComponentEnable("PacketSink", LOG_LEVEL_INFO);
 
-    cout << "ASTRA-sim + NS3" << endl;
-
     // Read network config and find logical dims.
     parse_args(argc, argv);
     AstraSim::LoggerFactory::init(logging_configuration);
+
+    AstraSim::LoggerFactory::get_logger("sim")->info("ASTRA-Sim NS3");
+
     read_logical_topo_config(logical_topology_configuration, logical_dims);
 
     // Setup network & System layer.
     vector<ASTRASimNetwork*> networks(num_npus, nullptr);
     vector<AstraSim::Sys*> systems(num_npus, nullptr);
+    vector<set<uint32_t>> wait_list(num_npus);
     json mem_json;
     std::ifstream rm_ifs(memory_configuration);
     rm_ifs >> mem_json;
@@ -334,7 +381,7 @@ int main(int argc, char* argv[]) {
       mem_json.contains("mem-bw");
     
     if (is_single) {
-      std::cout << "Single Memory Configuration Detected" << std::endl;
+      AstraSim::LoggerFactory::get_logger("sim")->info("Single Memory Configuration Detected");
       memory_levels.push_back(std::make_unique<AnalyticalMemory>(memory_configuration));
     } else {
       // local memory
@@ -382,6 +429,34 @@ int main(int argc, char* argv[]) {
             queues_per_dim, injection_scale, comm_scale, rendezvous_protocol);
     }
 
+    std::vector<std::vector<Sys*>> managed_systems(start_npu_ids.size());
+
+    for (std::size_t idx = 0; idx < start_npu_ids.size(); ++idx) {
+      int npu_id = start_npu_ids[idx];
+
+      // Determine the upper bound for this controller:
+      // - If there's a next controller, stop before it
+      // - Otherwise, go until npus_count
+      int upper_bound_id;
+      if (idx + 1 < start_npu_ids.size()) {
+        upper_bound_id = start_npu_ids[idx + 1];
+      } else {
+        upper_bound_id = num_npus;  // last controller handles until the end
+      }
+
+      // Collect systems in the range (npu_id+1 .. upper_bound_id-1)
+      for (int sid = npu_id + 1; sid < upper_bound_id; ++sid) {
+        if (sid < 0 || sid >= num_npus) {
+            AstraSim::LoggerFactory::get_logger("workload")
+                ->critical("Skipping invalid system id {} while building managed_systems", sid);
+        }
+        if (std::find(end_npu_ids.begin(), end_npu_ids.end(), sid) != end_npu_ids.end()) {
+          continue;
+        }
+        managed_systems[idx].push_back(systems[sid]);
+      }
+    }
+
     // Initialize ns3 simulation.
     if (auto ok = setup_ns3_simulation(network_configuration); ok == -1) {
         std::cerr << "Fail to setup ns3 simulation." << std::endl;
@@ -393,35 +468,142 @@ int main(int argc, char* argv[]) {
         systems[i]->workload->fire();
     }
 
+    // Open ZMQ
+    zmq::context_t context(1);
+    zmq::socket_t socket(context, zmq::socket_type::req);
+    socket.connect(zmq_addr);
+    AstraSim::LoggerFactory::get_logger("sim")->info("Connected to {}", zmq_addr);
+
     // Run the simulation by triggering the ns3 event queue.
     // Simulator::Run();
     Simulator::PreRun();
     bool exit = false;
     while (!exit) {
-        if(Simulator::IsFinished()){
-            Simulator::Schedule(NanoSeconds(idle_ticks), [] {});
-        }
+        // if(Simulator::IsFinished()){
+        //     Simulator::Schedule(NanoSeconds(idle_ticks), [] {});
+        //     bool is_fin = true;
+        //     for (std::size_t idx = 0; idx < end_npu_ids.size(); ++idx) {
+        //         int npu_id = end_npu_ids[idx];
+        //         if(!systems[npu_id]->workload->is_finished){
+        //             is_fin = false;
+        //         }
+        //     }
+        //     for (std::size_t idx = 0; idx < start_npu_ids.size(); ++idx) {
+        //         int npu_id = start_npu_ids[idx];
+        //         if(!systems[npu_id]->workload->is_finished){
+        //             is_fin = false;
+        //         }
+        //     }
+        //     if (!is_fin){
+        //         AstraSim::LoggerFactory::get_logger("workload")->info("Deadlock");
+        //         return -1;
+        //     }
+        // }
+
+        // Schedule one event
         Simulator::RunOneEvent();
-        for (int i = 0; i < num_npus; i++) {
-            if(systems[i]->workload->is_finished){
-                systems[i]->workload->report();
-                AstraSim::LoggerFactory::get_logger("workload")->info("Waiting");
-                string new_filename;
-                getline(cin, new_filename);
-                if (new_filename.compare("pass") == 0){ // if pass
-                    continue;
-                }
-                else if (new_filename.compare("exit") == 0){ // exit the simulator
-                    exit = true;
-                    break;
-                }
-                else{ // add new worklaod
-                    // cout << "Adding " << new_filename << endl;
-                    systems[i]->workload->add_workload(new_filename, {});
+        bool next_poll = false;
+
+        do {
+            // Poll
+            next_poll = false;
+            
+            for (std::size_t idx = 0; idx < end_npu_ids.size(); ++idx) {
+                int npu_id = end_npu_ids[idx];
+
+                if(systems[npu_id]->workload->is_finished && !systems[npu_id]->workload->is_sleep){
+                    for (auto waiting_npu_id : wait_list[npu_id]) {
+                        systems[waiting_npu_id]->workload->is_sleep = false;
+                        next_poll = true;
+                    }
+                    wait_list[npu_id].clear();
+
+                    report_to_zmq(socket, systems[npu_id]);
+
+                    zmq::message_t reply;
+                    auto result = socket.recv(reply, zmq::recv_flags::none);
+
+                    if (result) {
+                        std::string cmd_msg(static_cast<char*>(reply.data()), reply.size());
+                        std::vector<std::string> cmd_comp;
+                        parse_cmd(cmd_msg, cmd_comp);
+
+                        if (cmd_comp[0].compare("pass") == 0){ // Pass
+                            continue;
+                        } else if (cmd_comp[0].compare("exit") == 0) { // Exit
+                            exit = true;
+                            break;
+                        } else if (cmd_comp[0].compare("add_workload") == 0) { // Add workload
+                            systems[npu_id]->workload->add_workload(cmd_comp[1], {});
+                        } else if(cmd_comp[0].compare("sleep") == 0) { // Sleep
+                            systems[npu_id]->workload->is_sleep = true;
+                            Simulator::Schedule(NanoSeconds(std::stoul(cmd_comp[1])), [&systems, npu_id] {
+                                systems[npu_id]->workload->is_sleep = false;
+                            });
+                        } else if(cmd_comp[0].compare("done") == 0) { // Done
+                            systems[npu_id]->workload->is_sleep = true;
+                        } else if(cmd_comp[0].compare("wait") == 0) { // Wait
+                            systems[npu_id]->workload->is_sleep = true;
+                            wait_list[std::stoul(cmd_comp[1])].insert(npu_id);
+                        }
+                    } else {
+                        AstraSim::LoggerFactory::get_logger("sim")
+                            ->critical("Error on cmd recv");
+                    }
                 }
             }
-        }
+
+            if (exit) {
+                break;
+            }
+
+            for (std::size_t idx = 0; idx < start_npu_ids.size(); ++idx) {
+                int npu_id = start_npu_ids[idx];
+
+                if(systems[npu_id]->workload->is_finished && !systems[npu_id]->workload->is_sleep){
+                    for (auto waiting_npu_id : wait_list[npu_id]) {
+                        systems[waiting_npu_id]->workload->is_sleep = false;
+                        next_poll = true;
+                    }
+                    wait_list[npu_id].clear();
+
+                    report_to_zmq(socket, systems[npu_id]);
+
+                    zmq::message_t reply;
+                    auto result = socket.recv(reply, zmq::recv_flags::none);
+
+                    if (result) {
+                        std::string cmd_msg(static_cast<char*>(reply.data()), reply.size());
+                        std::vector<std::string> cmd_comp;
+                        parse_cmd(cmd_msg, cmd_comp);
+
+                        if (cmd_comp[0].compare("pass") == 0){ // Pass
+                            continue;
+                        } else if (cmd_comp[0].compare("exit") == 0) { // Exit
+                            exit = true;
+                            break;
+                        } else if (cmd_comp[0].compare("add_workload") == 0) { // Add workload
+                            systems[npu_id]->workload->add_workload(cmd_comp[1], managed_systems[idx]);
+                        } else if(cmd_comp[0].compare("sleep") == 0) { // Sleep
+                            systems[npu_id]->workload->is_sleep = true;
+                            Simulator::Schedule(NanoSeconds(std::stoul(cmd_comp[1])), [&systems, npu_id] {
+                                systems[npu_id]->workload->is_sleep = false;
+                            });
+                        } else if(cmd_comp[0].compare("done") == 0) { // Done
+                            systems[npu_id]->workload->is_sleep = true;
+                        } else if(cmd_comp[0].compare("wait") == 0) { // Wait
+                            systems[npu_id]->workload->is_sleep = true;
+                            wait_list[std::stoul(cmd_comp[1])].insert(npu_id);
+                        }
+                    } else {
+                        AstraSim::LoggerFactory::get_logger("sim")
+                            ->critical("Error on cmd recv");
+                    }
+                }
+            }
+        } while(next_poll && !exit);
     }
+
     completion_tracker->check_all_ranks_finished();
 
     ChromeTracer::GetInstance().Dump("log/log_trace.json");

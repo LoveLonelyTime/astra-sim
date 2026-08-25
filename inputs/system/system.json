@@ -17,5 +17,6 @@
   ],
   "collective-optimization": "localBWAware",
   "local-mem-bw": 768,
-  "boost-mode": 0
+  "boost-mode": 0,
+  "trace-enabled": 1
 }
