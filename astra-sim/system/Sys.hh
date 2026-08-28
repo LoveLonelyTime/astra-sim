@@ -246,6 +246,9 @@ class Sys : public Callable {
     static std::vector<Sys*> all_sys;  // vector of all Sys objects
 
     int id;
+    int node_id;
+    int instance_id;
+    int inner_id;
     bool initialized;
 
     // workload

@@ -8,6 +8,8 @@
 
 #define CHROME_TRACER_CAT_CPU_OP "CPU_OP"
 #define CHROME_TRACER_CAT_GPU_OP "GPU_OP"
+#define CHROME_TRACER_CAT_MEM_OP "MEM_OP"
+#define CHROME_TRACER_CAT_COMM_OP "COMM_OP"
 
 namespace AstraSim {
 

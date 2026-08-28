@@ -6,6 +6,8 @@ LICENSE file in the root directory of this source tree.
 #ifndef __INT_DATA_HH__
 #define __INT_DATA_HH__
 
+#include "astra-sim/common/ChromeTracer.hh"
+
 namespace AstraSim {
 
 class IntData : public CallData {
@@ -15,6 +17,7 @@ class IntData : public CallData {
     }
     int data;
     uint64_t execution_time;
+    std::unique_ptr<ChromeTracer::TraceEvent> tracer_event;
 };
 
 }  // namespace AstraSim

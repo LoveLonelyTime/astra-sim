@@ -1,5 +1,6 @@
 #include "astra-sim/common/ChromeTracer.hh"
 #include <fstream>
+#include <iomanip>
 
 namespace AstraSim {
 
@@ -9,8 +10,8 @@ std::unique_ptr<ChromeTracer::TraceEvent> ChromeTracer::Begin(const std::string&
     event->cat = cat;
     event->ts = start;
     event->dur = 0;
-    event->pid = instance_id;
-    event->tid = npu_id;
+    event->pid = instance_id + 1;
+    event->tid = npu_id + 1;
 
     return event;
 }
@@ -42,8 +43,13 @@ void ChromeTracer::Dump(const std::string& file_name)
         ofs << "      \"name\": \"" << event->name << "\",\n";
         ofs << "      \"cat\": \"" << event->cat << "\",\n";
         ofs << "      \"ph\": \"X\",\n";
-        ofs << "      \"ts\": " << event->ts << ",\n";
-        ofs << "      \"dur\": " << event->dur << ",\n";
+        // Trace Event Format specifies ts/dur in microseconds. Emit them as
+        // fixed-point microseconds (3 decimals) so sub-microsecond (ns)
+        // resolution is preserved without integer-truncation gaps.
+        ofs << "      \"ts\": " << std::fixed << std::setprecision(3)
+            << (static_cast<double>(event->ts) / 1000.0) << ",\n";
+        ofs << "      \"dur\": " << std::fixed << std::setprecision(3)
+            << (static_cast<double>(event->dur) / 1000.0) << ",\n";
         ofs << "      \"pid\": " << event->pid << ",\n";
         ofs << "      \"tid\": " << event->tid << "\n";
         ofs << "    }";

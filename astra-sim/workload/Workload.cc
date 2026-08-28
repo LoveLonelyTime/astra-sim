@@ -176,7 +176,7 @@ void Workload::issue(shared_ptr<Chakra::ETFeederNode> node) {
 void Workload::issue_replay(shared_ptr<Chakra::ETFeederNode> node) {
     WorkloadLayerHandlerData* wlhd = new WorkloadLayerHandlerData;
     wlhd->node_id = node->id();
-    wlhd->tracer_event = ChromeTracer::GetInstance().Begin(node->name(), node->is_cpu_op() ? CHROME_TRACER_CAT_CPU_OP : CHROME_TRACER_CAT_GPU_OP, Sys::boostedTick(), 0, sys->id);
+    wlhd->tracer_event = ChromeTracer::GetInstance().Begin(node->name(), node->is_cpu_op() ? CHROME_TRACER_CAT_CPU_OP : CHROME_TRACER_CAT_GPU_OP, Sys::boostedTick(), sys->instance_id, sys->inner_id);
     uint64_t runtime = 1ul;
     if (node->runtime() != 0ul) {
         // chakra runtimes are in microseconds and we should convert it into
@@ -213,6 +213,7 @@ void Workload::issue_mem(shared_ptr<Chakra::ETFeederNode> node) {
     wlhd->sys_id = sys->id;
     wlhd->workload = this;
     wlhd->node_id = node->id();
+    wlhd->tracer_event = ChromeTracer::GetInstance().Begin(node->name(), CHROME_TRACER_CAT_MEM_OP, Sys::boostedTick(), sys->instance_id, sys->inner_id);
     wlhd->device_id = node->tensor_device();
     if (node->type() == ChakraNodeType::PIM_COMP_NODE) { // pim implementation
         wlhd->pim_enabled = true;
@@ -250,6 +251,7 @@ void Workload::issue_comp(shared_ptr<Chakra::ETFeederNode> node) {
     if (sys->roofline_enabled) {
         WorkloadLayerHandlerData* wlhd = new WorkloadLayerHandlerData;
         wlhd->node_id = node->id();
+        wlhd->tracer_event = ChromeTracer::GetInstance().Begin(node->name(), node->is_cpu_op() ? CHROME_TRACER_CAT_CPU_OP : CHROME_TRACER_CAT_GPU_OP, Sys::boostedTick(), sys->instance_id, sys->inner_id);
 
         double operational_intensity = static_cast<double>(node->num_ops()) /
                                        static_cast<double>(node->tensor_size());
@@ -296,12 +298,13 @@ void Workload::issue_comm(shared_ptr<Chakra::ETFeederNode> node) {
     } else {
         // involved_dim does not exist in ETFeeder.
         // Assume involved_dim = [1,1,1,1,1] which we could simulate 5-Dimension.
-	// Could use Process Group to build involved_dim later. 
-	// Once process group is implemented, you should get
+	    // Could use Process Group to build involved_dim later. 
+	    // Once process group is implemented, you should get
         // that with node->pg_name()
 	
-	for(int i = 0; i < 4; i++)
+        for (int i = 0; i < 4; i++) {
             involved_dim.push_back(true);
+        }
     }
 
     if (!node->is_cpu_op() &&
@@ -310,6 +313,7 @@ void Workload::issue_comm(shared_ptr<Chakra::ETFeederNode> node) {
             DataSet* fp =
                 sys->generate_all_reduce(node->comm_size(), involved_dim,
                                          comm_group, node->comm_priority());
+            fp->tracer_event = ChromeTracer::GetInstance().Begin(node->name(), CHROME_TRACER_CAT_COMM_OP, Sys::boostedTick(), sys->instance_id, sys->inner_id);
             collective_comm_node_id_map[fp->my_id] = node->id();
             collective_comm_wrapper_map[fp->my_id] = fp;
             fp->set_notifier(this, EventType::CollectiveCommunicationFinished);
@@ -318,6 +322,7 @@ void Workload::issue_comm(shared_ptr<Chakra::ETFeederNode> node) {
             DataSet* fp =
                 sys->generate_all_to_all(node->comm_size(), involved_dim,
                                          comm_group, node->comm_priority());
+            fp->tracer_event = ChromeTracer::GetInstance().Begin(node->name(), CHROME_TRACER_CAT_COMM_OP, Sys::boostedTick(), sys->instance_id, sys->inner_id);
             collective_comm_node_id_map[fp->my_id] = node->id();
             collective_comm_wrapper_map[fp->my_id] = fp;
             fp->set_notifier(this, EventType::CollectiveCommunicationFinished);
@@ -326,6 +331,7 @@ void Workload::issue_comm(shared_ptr<Chakra::ETFeederNode> node) {
             DataSet* fp =
                 sys->generate_all_gather(node->comm_size(), involved_dim,
                                          comm_group, node->comm_priority());
+            fp->tracer_event = ChromeTracer::GetInstance().Begin(node->name(), CHROME_TRACER_CAT_COMM_OP, Sys::boostedTick(), sys->instance_id, sys->inner_id);
             collective_comm_node_id_map[fp->my_id] = node->id();
             collective_comm_wrapper_map[fp->my_id] = fp;
             fp->set_notifier(this, EventType::CollectiveCommunicationFinished);
@@ -335,6 +341,7 @@ void Workload::issue_comm(shared_ptr<Chakra::ETFeederNode> node) {
             DataSet* fp =
                 sys->generate_reduce_scatter(node->comm_size(), involved_dim,
                                              comm_group, node->comm_priority());
+            fp->tracer_event = ChromeTracer::GetInstance().Begin(node->name(), CHROME_TRACER_CAT_COMM_OP, Sys::boostedTick(), sys->instance_id, sys->inner_id);
             collective_comm_node_id_map[fp->my_id] = node->id();
             collective_comm_wrapper_map[fp->my_id] = fp;
             fp->set_notifier(this, EventType::CollectiveCommunicationFinished);
@@ -403,6 +410,9 @@ void Workload::call(EventType event, CallData* data) {
 
     if (event == EventType::CollectiveCommunicationFinished) {
         IntData* int_data = (IntData*)data;
+        if (int_data->tracer_event != nullptr) {
+            ChromeTracer::GetInstance().End(std::move(int_data->tracer_event), Sys::boostedTick());
+        }
         hw_resource->tics_gpu_comms += int_data->execution_time;
         uint64_t node_id = collective_comm_node_id_map[int_data->data];
         shared_ptr<Chakra::ETFeederNode> node = et_feeder->lookupNode(node_id);

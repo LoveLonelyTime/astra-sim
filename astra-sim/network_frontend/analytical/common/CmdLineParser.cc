@@ -39,12 +39,19 @@ void CmdLineParser::define_options() noexcept {
         cxxopts::value<double>()->default_value("1"))(
         "rendezvous-protocol", "Whether to enable rendezvous protocol",
         cxxopts::value<bool>()->default_value("false"))(
-        "start-npu-ids",
-        "Start NPU id list (comma-separated)",
+        "start-npu-ids", "Start NPU id list (comma-separated)",
         cxxopts::value<std::vector<int>>()->default_value("-1"))(
-        "end-npu-ids",
-        "End NPU id list (comma-separated)",
-        cxxopts::value<std::vector<int>>()->default_value("-1"));
+        "end-npu-ids", "End NPU id list (comma-separated)",
+        cxxopts::value<std::vector<int>>()->default_value("-1"))(
+        "node-npu-ids", "Node IDs of npus",
+        cxxopts::value<std::vector<int>>())(
+        "instance-npu-ids", "Instance IDs of npus",
+        cxxopts::value<std::vector<int>>())(
+        "inner-npu-ids", "Inner IDs of npus",
+        cxxopts::value<std::vector<int>>())(
+        "zmq-addr", "ZMQ Address",
+        cxxopts::value<std::string>()
+        );
 }
 
 void CmdLineParser::parse(int argc, char* argv[]) noexcept {

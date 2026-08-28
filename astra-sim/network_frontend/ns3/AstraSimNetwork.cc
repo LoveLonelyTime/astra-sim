@@ -239,6 +239,9 @@ string logging_configuration = "empty";
 string zmq_addr;
 std::vector<uint32_t> start_npu_ids;
 std::vector<uint32_t> end_npu_ids;
+std::vector<uint32_t> node_npu_ids;
+std::vector<uint32_t> instance_npu_ids;
+std::vector<uint32_t> inner_npu_ids;
 int num_queues_per_dim = 1;
 double comm_scale = 1;
 double injection_scale = 1;
@@ -303,6 +306,9 @@ void parse_cmd(const std::string& str, vector<std::string>& comp) {
 void parse_args(int argc, char* argv[]) {
     std::string start_npu_ids_str;
     std::string end_npu_ids_str;
+    std::string node_npu_ids_str;
+    std::string instance_npu_ids_str;
+    std::string inner_npu_ids_str;
 
     CommandLine cmd;
     cmd.AddValue("workload-configuration", "Workload configuration file.",
@@ -329,6 +335,12 @@ void parse_args(int argc, char* argv[]) {
                  start_npu_ids_str);
     cmd.AddValue("end-npu-ids", "IDs of end npu of instances.",
                  end_npu_ids_str);
+    cmd.AddValue("node-npu-ids", "Node IDs of npus.",
+                 node_npu_ids_str);
+    cmd.AddValue("instance-npu-ids", "Instance IDs of npus.",
+                 instance_npu_ids_str);
+    cmd.AddValue("inner-npu-ids", "Inner IDs of npus.",
+                 inner_npu_ids_str);
     cmd.AddValue("num-queues-per-dim", "Number of queues per each dimension",
                  num_queues_per_dim);
     cmd.AddValue("comm-scale", "Communication scale", comm_scale);
@@ -340,6 +352,9 @@ void parse_args(int argc, char* argv[]) {
 
     parse_vec(start_npu_ids_str, start_npu_ids);
     parse_vec(end_npu_ids_str, end_npu_ids);
+    parse_vec(node_npu_ids_str, node_npu_ids);
+    parse_vec(instance_npu_ids_str, instance_npu_ids);
+    parse_vec(inner_npu_ids_str, inner_npu_ids);
 }
 
 void report_to_zmq(zmq::socket_t& socket, AstraSim::Sys* sys) {
@@ -427,6 +442,11 @@ int main(int argc, char* argv[]) {
             npu_id, workload_configuration, comm_group_configuration,
             system_configuration, memory_apis, networks[npu_id], logical_dims,
             queues_per_dim, injection_scale, comm_scale, rendezvous_protocol);
+        
+        // Config id
+        systems[npu_id]->node_id = node_npu_ids[npu_id];
+        systems[npu_id]->instance_id = instance_npu_ids[npu_id];
+        systems[npu_id]->inner_id = inner_npu_ids[npu_id];
     }
 
     std::vector<std::vector<Sys*>> managed_systems(start_npu_ids.size());

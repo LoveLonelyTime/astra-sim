@@ -10,6 +10,7 @@ LICENSE file in the root directory of this source tree.
 #include "astra-sim/system/Callable.hh"
 #include "astra-sim/system/Common.hh"
 #include "astra-sim/system/StreamStat.hh"
+#include "astra-sim/common/ChromeTracer.hh"
 
 namespace AstraSim {
 
@@ -30,6 +31,7 @@ class DataSet : public Callable, public StreamStat {
     Tick finish_tick;
     Tick creation_tick;
     std::pair<Callable*, EventType>* notifier;
+    std::unique_ptr<ChromeTracer::TraceEvent> tracer_event;
 };
 
 }  // namespace AstraSim

@@ -15,7 +15,7 @@
 	url = https://github.com/casys-kaist/chakra.git
 [submodule "extern/network_backend/analytical"]
 	path = extern/network_backend/analytical
-	url = https://github.com/casys-kaist/astra-network-analytical.git
+	url = https://github.com/LoveLonelyTime/astra-network-analytical.git
 [submodule "extern/memory_backend/analytical"]
 	path = extern/memory_backend/analytical
 	url = https://github.com/casys-kaist/astra-memory-analytical.git

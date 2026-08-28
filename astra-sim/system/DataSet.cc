@@ -42,6 +42,7 @@ void DataSet::notify_stream_finished(StreamStat* data) {
             delete notifier;
             IntData* int_data = new IntData(my_id);
             int_data->execution_time = finish_tick - creation_tick;
+            int_data->tracer_event = std::move(this->tracer_event);
             c->call(ev, int_data);
         }
     }
